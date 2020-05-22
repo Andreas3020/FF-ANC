@@ -1,0 +1,25 @@
+/*
+* Authors: Shana Reynders & Andreas Dierickx
+* Titel: Active noise control for ego-noise suppression in an unmanned aerial vehicle
+* Date: 2019-2020
+/
+
+/*
+* Copyright?
+*/
+
+This folder contains the c_code and audio developed during the working of this thesis.
+All the code is runable using the makefiles provided in the folder the code is.
+
+Four versions of the ANC algorithm were developed and available her.
+The first two versions are the simulations for the time and time-frequency domain.
+They are respectively the files RBF_time.c and RBF_TF.c.
+The other two versions are the real-life implemenations for the time and time-frequency domain.
+They are respectively the files ANC_time.c and ANC_TF.c. An important note before
+using the real-life implementations is that they were never actually tested.
+They are based on the simulations, but real life testing was impossible due to
+the the closure of the labs during the Corona epidemic of 2020.
+
+Other than those four versions the audio recordings used for this thesis
+are available here. Two versions of them are availabel, one with and one without lowpass filter (1kHz).
+Those with were used in the c-code while those without are only there for the analysis afterwards.
