@@ -73,16 +73,11 @@ typedef struct{
 * FOR FREQ OF 8820Hz
 */
 #define LENGTH 8 // the delay between the two closest propellers and the error-micropohone at the certain frequency (8 for 8820Hz)
-#define FFT_WINDOW 3*LENGTH
-#define DURATION 15000 // Nr of times the loop is executing (consisting of 2 cycles each time)
+#define USED_BINS 1 // After FFT, how many bins are used (induces a low pass filter)
+#define DURATION 12127 // Nr of times the loop is executing (consisting of 2 cycles each time)
 #define INPUTLENGTH 248886 // length of the input recording
-#define STEPSIZE 0.2
-
+#define STEPSIZE 0.1
 #define interpropellerDelay 2 // sample delay between the two closer propellers and the two further away
-// If you want to update every loop (!= 1) of twice a loop (= 1).
-// If only every loop, the update of the coefficients happens on the coefficients it calculated its output on.
-// Else it is already adjusted by the previous update
-#define DOUBLE_UPDATE 0
 
 /*
 * Declaration of the functions
@@ -94,11 +89,11 @@ int writeFilesSpeaker(npy_float64 output[]);
 void* micRecord(void* val);
 void* calc(void* val);
 
-void transformation_func(int* resultPos, npy_float64 input[LENGTH + interpropellerDelay][5], fftw_complex** coefs, npy_float64 output[LENGTH], npy_float64 prevOutput[LENGTH], fftw_complex* prevError, fftw_complex** p, int N_STFT, int R_STFT, int FFT_HALF, npy_float64* FFTin, fftw_complex* FFTout, fftw_complex* IFFTin, npy_float64* IFFTout, fftw_plan planFFT, fftw_plan planIFFT);
-void nlmsUpdate(float stepsize, fftw_complex** coefs, fftw_complex** p, fftw_complex* prevError, int FFT_HALF);
+void transformation_func(int* resultPos, npy_float64 input[LENGTH + interpropellerDelay][5], fftw_complex*** coefs, npy_float64 output[LENGTH], npy_float64 prevOutput[LENGTH], fftw_complex** prevError, fftw_complex*** p, int N_STFT, int R_STFT, int N_STFT_HALF, npy_float64* FFTin, fftw_complex* FFTout, fftw_complex* IFFTin, npy_float64* IFFTout, fftw_plan planFFT, fftw_plan planIFFT);
+void nlmsUpdate(float stepsize, fftw_complex*** coefs, fftw_complex*** p, fftw_complex** prevError, int N_STFT_HALF);
 
-void TFtransform(int N_STFT, int R_STFT, int FFT_HALF, npy_float64 input[N_STFT * 2], npy_float64* FFTin, fftw_complex* FFTout, fftw_plan planFFT);
-void outputTransform(int N_STFT, int R_STFT, int FFT_HALF, fftw_complex* IFFTin, npy_float64* IFFTout, fftw_plan planIFFT, npy_float64* output);
+void TFtransform(int N_STFT, int R_STFT, int N_STFT_HALF, npy_float64 input[N_STFT * 2], npy_float64* FFTin, fftw_complex* FFTout, fftw_plan planFFT, fftw_complex** TFdomain);
+void outputTransform(int N_STFT, int R_STFT, int N_STFT_HALF, fftw_complex* IFFTin, npy_float64* IFFTout, fftw_plan planIFFT, npy_float64* output, fftw_complex** outTF);
 
 /*
   * *********** Future work **************
@@ -162,7 +157,7 @@ int main(){
 
   int duration = DURATION; // how many cycles
   float stepsize = STEPSIZE; // determines the rate of convergence, but also the accuracy
-  int N_STFT = LENGTH; // size of each frame added to the FFT array
+  int N_STFT = 2* LENGTH; // size of each frame added to the FFT array
   int R_STFT = N_STFT*0.5; // overlap in the FFT array (50%)
 
   //init recx as zero
@@ -239,7 +234,7 @@ npy_float64** audioSet(){
   npy_float64** array;
 
   // import the .py file in which the to-call python function is located
-  pName = PyUnicode_FromString("readFiles_TF");
+  pName = PyUnicode_FromString("readFiles");
   pModule = PyImport_Import(pName);
   Py_DECREF(pName);
   if(pModule == NULL) printf("its null\n");
@@ -294,7 +289,7 @@ npy_float64** audioSet(){
 }
 
 /*
-  * Function which calls a Python extension to write the resulting signal to a
+  * Function which calls a Python extension to write the residual error to a
   * .wav file. This way the result can be easily analysed and replayed.
 */
 int writeFilesResult(npy_float64 output[]){
@@ -364,7 +359,7 @@ int writeFilesResult(npy_float64 output[]){
 
 
 /*
-  * Function which calls a Python extension to write the resulting signal to a
+  * Function which calls a Python extension to write the speaker signal to a
   * .wav file. This way the result can be easily analysed and replayed.
 */
 int writeFilesSpeaker(npy_float64 output[]){
@@ -607,46 +602,57 @@ void* calc(void* cArgs){
     int* written2 = args.written2;
     int N_STFT = args.N_STFT;
     int R_STFT = args.R_STFT;
-    int FFT_HALF = FFT_WINDOW * 0.5 +1; // size of Time-frequency array
+    int N_STFT_HALF = N_STFT * 0.5 +1; // size of Time-frequency array
 
     // keeps track of where the next postion is to write a value to in the result array
     int resultPos = 0;
 
     // init the coefficients to random values between +0.5 and -0.5 for four propellers
-    fftw_complex** coefs = (fftw_complex**) malloc(4 * sizeof(fftw_complex*));
+    fftw_complex*** coefs = (fftw_complex***) malloc(4 * sizeof(fftw_complex*));
     for(int i = 0; i < 4; i++){
-      coefs[i] = (fftw_complex*) malloc(FFT_HALF * sizeof(fftw_complex));
-      for(int j = 0; j < FFT_HALF; j++){
-        coefs[i][j][0] = ((float)rand()/((float)RAND_MAX)) - 0.5;
-        coefs[i][j][1] = ((float)rand()/((float)RAND_MAX)) - 0.5;
+      coefs[i] = (fftw_complex**) malloc(2 * sizeof(fftw_complex));
+      for(int k = 0; k < 2; k++){
+        coefs[i][k] = (fftw_complex*) malloc(USED_BINS * sizeof(fftw_complex));
+        for(int j = 0; j < USED_BINS; j++){
+          coefs[i][k][j][0] = ((float)rand()/((float)RAND_MAX)) - 0.5;
+          coefs[i][k][j][1] = ((float)rand()/((float)RAND_MAX)) - 0.5;
+        }
       }
     }
 
     // init the prevError and p  array in the Time-frequency domain (complex), used for the NLMS update
-    fftw_complex* prevError = (fftw_complex*)fftw_malloc(FFT_HALF * sizeof(fftw_complex));
-    fftw_complex** p1 = (fftw_complex**) fftw_malloc(4 * sizeof(fftw_complex));
-    fftw_complex** p2 = (fftw_complex**) fftw_malloc(4 * sizeof(fftw_complex));
-    for(int i = 0; i < 4; i++){
-      p1[i] = (fftw_complex*) malloc(FFT_HALF * sizeof(fftw_complex));
-      p2[i] = (fftw_complex*) malloc(FFT_HALF * sizeof(fftw_complex));
-      memset( p1[i], 0, FFT_HALF * sizeof(fftw_complex));
-      memset( p2[i], 0, FFT_HALF * sizeof(fftw_complex));
-    }
+    fftw_complex** prevError = (fftw_complex**)fftw_malloc(2 * sizeof(fftw_complex));
+    prevError[0] = (fftw_complex*)fftw_malloc(N_STFT_HALF * sizeof(fftw_complex));
+    memset(prevError[0], 0, N_STFT_HALF* sizeof(npy_float64));
+    prevError[1] = (fftw_complex*)fftw_malloc(N_STFT_HALF * sizeof(fftw_complex));
+    memset(prevError[1], 0, N_STFT_HALF* sizeof(npy_float64));
 
+    fftw_complex*** p1 = (fftw_complex***) fftw_malloc(4 * sizeof(fftw_complex));
+    fftw_complex*** p2 = (fftw_complex***) fftw_malloc(4 * sizeof(fftw_complex));
+    for(int i = 0; i < 4; i++){
+      p1[i] = (fftw_complex**) malloc(2 * sizeof(fftw_complex));
+      p2[i] = (fftw_complex**) malloc(2 * sizeof(fftw_complex));
+      for(int k = 0; k < 2; k++){
+        p1[i][k] = (fftw_complex*) malloc(USED_BINS * sizeof(fftw_complex));
+        p2[i][k] = (fftw_complex*) malloc(USED_BINS * sizeof(fftw_complex));
+        memset( p1[i][k], 0, USED_BINS * sizeof(fftw_complex));
+        memset( p2[i][k], 0, USED_BINS * sizeof(fftw_complex));
+      }
+    }
 
     // init the arrays for the transformation to the TF-domain
     npy_float64 *FFTin, *IFFTout;
     fftw_complex *FFTout, *IFFTin;
     fftw_plan planFFT, planIFFT;
 
-    FFTin = (npy_float64*) fftw_malloc(FFT_WINDOW * sizeof(npy_float64));
-    FFTout = (fftw_complex*) fftw_malloc(FFT_HALF * sizeof(fftw_complex));
-    IFFTin = (fftw_complex*) fftw_malloc(FFT_HALF * sizeof(fftw_complex));
-    IFFTout = (npy_float64*) fftw_malloc(FFT_WINDOW * sizeof(npy_float64));
+    FFTin = (npy_float64*) fftw_malloc(N_STFT * sizeof(npy_float64));
+    FFTout = (fftw_complex*) fftw_malloc(N_STFT_HALF * sizeof(fftw_complex));
+    IFFTin = (fftw_complex*) fftw_malloc(N_STFT_HALF * sizeof(fftw_complex));
+    IFFTout = (npy_float64*) fftw_malloc(N_STFT * sizeof(npy_float64));
 
     // init the plans for the FFT
-    planFFT = fftw_plan_dft_r2c_1d(FFT_WINDOW, FFTin, FFTout, FFTW_MEASURE);
-    planIFFT = fftw_plan_dft_c2r_1d(FFT_WINDOW, IFFTin, IFFTout, FFTW_MEASURE);
+    planFFT = fftw_plan_dft_r2c_1d(N_STFT, FFTin, FFTout, FFTW_MEASURE);
+    planIFFT = fftw_plan_dft_c2r_1d(N_STFT, IFFTin, IFFTout, FFTW_MEASURE);
 
     int outPos = 0;
   // loops through the transformation_func and the NLMS of the two phases
@@ -662,23 +668,12 @@ void* calc(void* cArgs){
 
       // calls transformation_func
       pthread_mutex_lock(mutex1p);
-      transformation_func(&resultPos, rec1, coefs, play1, play2, prevError, p1, N_STFT, R_STFT, FFT_HALF, FFTin, FFTout, IFFTin, IFFTout, planFFT, planIFFT);
-      for(int j = 0; j < LENGTH; j++, outPos++){
-        outArray[outPos] = play1[j];
-      }
+      transformation_func(&resultPos, rec1, coefs, play1, play2, prevError, p1, N_STFT, R_STFT, N_STFT_HALF, FFTin, FFTout, IFFTin, IFFTout, planFFT, planIFFT);
       *written1 = 0; // indicate that the transformation_func is finished
 
       pthread_mutex_unlock(mutex1p);
     pthread_mutex_unlock(mutex1r);
     pthread_cond_broadcast(args.cond12); // if the next input may be read
-
-    // If false, the coefs update happens only every loop. This causes the update
-    // to be executed on coefs on which the output was calculated. If true, This
-    // happens on coefs that are already adjusted by the previous cycle.
-    if(DOUBLE_UPDATE == 1){
-      // calls the update function to update the coefficients
-      nlmsUpdate(stepsize, coefs, p2, prevError, FFT_HALF);
-    }
 
     // Calculate the current output signal and the previous error.
     // Also insert the previous inputs in prevInputs.
@@ -690,10 +685,7 @@ void* calc(void* cArgs){
 
       // calls transformation_func
       pthread_mutex_lock(mutex2p);
-      transformation_func(&resultPos, rec2, coefs, play2, play1, prevError, p2, N_STFT, R_STFT, FFT_HALF, FFTin, FFTout, IFFTin, IFFTout, planFFT, planIFFT);
-      for(int j = 0; j < LENGTH; j++, outPos++){
-        outArray[outPos] = play2[j];
-      }
+      transformation_func(&resultPos, rec2, coefs, play2, play1, prevError, p2, N_STFT, R_STFT, N_STFT_HALF, FFTin, FFTout, IFFTin, IFFTout, planFFT, planIFFT);
 
       *written2 = 0; // indicate that the FIR is finished
 
@@ -702,7 +694,7 @@ void* calc(void* cArgs){
     pthread_cond_broadcast(args.cond22);
 
     // calls the update function to update the coefficients
-    nlmsUpdate(stepsize, coefs, p1, prevError, FFT_HALF);
+    nlmsUpdate(stepsize, coefs, p1, prevError, N_STFT_HALF);
   }
 
   // free all the allocated memory blocks
@@ -710,12 +702,28 @@ void* calc(void* cArgs){
   fftw_free(FFTout);
   fftw_free(IFFTin);
   fftw_free(IFFTout);
-  fftw_free(p1);
-  fftw_free(p2);
-  fftw_free(prevError);
-  fftw_free(coefs);
   fftw_destroy_plan(planFFT);
   fftw_destroy_plan(planIFFT);
+
+  for(int i = 0; i < 4; i++){
+    for(int k = 0; k < 2; k++){
+      fftw_free(p1[i][k]);
+      fftw_free(p2[i][k]);
+      fftw_free(coefs[i][k]);
+    }
+    fftw_free(p1[i]);
+    fftw_free(p2[i]);
+    fftw_free(coefs[i]);
+  }
+
+  for(int k = 0; k < 2; k++){
+    fftw_free(prevError[k]);
+  }
+
+  fftw_free(p1);
+  fftw_free(p2);
+  fftw_free(coefs);
+  fftw_free(prevError);
 
   printf("calc thread done\n");
   pthread_exit(NULL);
@@ -729,14 +737,27 @@ void* calc(void* cArgs){
   * During transformation_func the previous error is also calculated and the
   * previous inputs are written to the prevInputs array to be used in NLMS
 */
-void transformation_func(int* resultPos, npy_float64 input[LENGTH + interpropellerDelay][5], fftw_complex** coefs, npy_float64 output[LENGTH], npy_float64 prevOutput[LENGTH], fftw_complex* prevError, fftw_complex** p, int N_STFT, int R_STFT, int FFT_HALF, npy_float64* FFTin, fftw_complex* FFTout, fftw_complex* IFFTin, npy_float64* IFFTout, fftw_plan planFFT, fftw_plan planIFFT){
+void transformation_func(int* resultPos, npy_float64 input[LENGTH + interpropellerDelay][5], fftw_complex*** coefs, npy_float64 output[LENGTH], npy_float64 prevOutput[LENGTH], fftw_complex** prevError, fftw_complex*** p, int N_STFT, int R_STFT, int N_STFT_HALF, npy_float64* FFTin, fftw_complex* FFTout, fftw_complex* IFFTin, npy_float64* IFFTout, fftw_plan planFFT, fftw_plan planIFFT){
   // init the variables
-  npy_float64* norm = fftw_malloc(FFT_HALF * sizeof(npy_float64));
+  npy_float64* norm = malloc(USED_BINS * sizeof(npy_float64)); // norm used in calculation of p
+
+  // Error array in the time domain
   npy_float64* Error = malloc(N_STFT * 2 * sizeof(npy_float64));
   memset(Error, 0, N_STFT * 2 * sizeof(npy_float64));
 
-  // set IFFTin on zero
-  memset(IFFTin, 0, FFT_HALF * sizeof(fftw_complex));
+  // inputs in the Time-frequency domain
+  fftw_complex** TFdomain = (fftw_complex**)fftw_malloc(2 * sizeof(fftw_complex));
+  TFdomain[0] = (fftw_complex*)fftw_malloc(N_STFT_HALF * sizeof(fftw_complex));
+  memset(TFdomain[0], 0, N_STFT_HALF* sizeof(npy_float64));
+  TFdomain[1] = (fftw_complex*)fftw_malloc(N_STFT_HALF * sizeof(fftw_complex));
+  memset(TFdomain[1], 0, N_STFT_HALF* sizeof(npy_float64));
+
+  // output in the time-frequency domain
+  fftw_complex** outTF = (fftw_complex**)fftw_malloc(2 * sizeof(fftw_complex));
+  outTF[0] = (fftw_complex*)fftw_malloc(N_STFT_HALF * sizeof(fftw_complex));
+  memset(outTF[0], 0, N_STFT_HALF* sizeof(npy_float64));
+  outTF[1] = (fftw_complex*)fftw_malloc(N_STFT_HALF * sizeof(fftw_complex));
+  memset(outTF[1], 0, N_STFT_HALF* sizeof(npy_float64));
 
   // loops through the whole input array and calculates
   // the previous error which is used in the NLMS update.
@@ -745,17 +766,20 @@ void transformation_func(int* resultPos, npy_float64 input[LENGTH + interpropell
     // subtract the last calculated outputs from the samples of the
     // error-microphone of the new input array. The previous calculated
     // output is the one that predicts the current error microphone and thus
-    // this gives the total error. (LENGTH is the delay between the input and the error-microphone)
+    // this gives the total error.
     Error[x + (N_STFT - R_STFT)] = input[x][4] - prevOutput[x];
     result[*resultPos] = Error[x + (N_STFT - R_STFT)];
+    outArray[*resultPos] = prevOutput[x];
   }
 
   // Transforms the error array to the Time-frequency domain
-  TFtransform(N_STFT, R_STFT, FFT_HALF, Error, FFTin, FFTout, planFFT);
+  TFtransform(N_STFT, R_STFT, N_STFT_HALF, Error, FFTin, FFTout, planFFT, TFdomain);
 
-  for(int i = 0; i < (FFT_WINDOW * 0.5 +1); i++){
-    prevError[i][0] = FFTout[i][0];
-    prevError[i][1] = FFTout[i][1];
+  for(int k = 0; k < 2; k++){
+    for(int i = 0; i < (N_STFT_HALF); i++){
+      prevError[k][i][0] = TFdomain[k][i][0];
+      prevError[k][i][1] = TFdomain[k][i][1];
+    }
   }
 
   // loops through the input array of each propeller and converts it to the TF domain.
@@ -764,52 +788,64 @@ void transformation_func(int* resultPos, npy_float64 input[LENGTH + interpropell
   for(int i = 0; i < 4; i++){
     // insert the inputs in an array which can be converted to the TF domain.
     // this array is zeropadded at the end the beginning
-    npy_float64* tInput = malloc(N_STFT * 2 * sizeof(npy_float64));
-    memset(tInput, 0, N_STFT * 2 * sizeof(npy_float64));
+    npy_float64* tInput = malloc((N_STFT - R_STFT) * 3 * sizeof(npy_float64));
+    memset(tInput, 0,(N_STFT - R_STFT) * 3 * sizeof(npy_float64));
 
     for(int j = 0; j < LENGTH; j++){
       tInput[j + N_STFT - R_STFT] = input[j][i];
     }
 
     // Transforms the input array into the Time-frequency domain
-    TFtransform(N_STFT, R_STFT, FFT_HALF, tInput, FFTin, FFTout, planFFT);
+    TFtransform(N_STFT, R_STFT, N_STFT_HALF, tInput, FFTin, FFTout, planFFT, TFdomain);
     // set the norm to zero again
-    memset(norm, 0, FFT_HALF * sizeof(npy_float64));
+    memset(norm, 0, USED_BINS * sizeof(npy_float64));
 
     // multiply the coefficients with the TF domain
     // Also calculate the norm of the propeller in the TF domain
-    for(int j = 0; j < FFT_HALF; j++){
-      IFFTin[j][0] += FFTout[j][0]*coefs[i][j][0];
-      IFFTin[j][1] += FFTout[j][1]*coefs[i][j][1];
-      norm[j] += FFTout[j][0] * FFTout[j][0] + FFTout[j][1] * FFTout[j][1];
+    for(int k = 0; k < 2; k++){
+      for(int j = 0; j < USED_BINS; j++){
+        outTF[k][j][0] += TFdomain[k][j][0]*coefs[i][k][j][0];
+        outTF[k][j][1] += TFdomain[k][j][1]*coefs[i][k][j][1];
+        norm[j] += TFdomain[k][j][0] * TFdomain[k][j][0] + TFdomain[k][j][1] * TFdomain[k][j][1];
+      }
     }
-
-    // calculate the p array using the norm of the propeller input
-    for(int j = 0; j < FFT_HALF; j++){
-      p[i][j][0] = FFTout[j][0]/(norm[j]+1);
-      p[i][j][1] = FFTout[j][1]/(norm[j]+1);
+      // calculate the p array using the norm of the propeller input
+    for(int k = 0; k < 2; k++){
+      for(int j = 0; j < USED_BINS; j++){
+        p[i][k][j][0] = TFdomain[k][j][0]/(norm[j]+1);
+        p[i][k][j][1] = TFdomain[k][j][1]/(norm[j]+1);
+      }
     }
   }
 
   // Ttransforms the output array (IFFTin) to back to the time domain
-  outputTransform(N_STFT, R_STFT, FFT_HALF, IFFTin, IFFTout, planIFFT, output);
+  outputTransform(N_STFT, R_STFT, N_STFT_HALF, IFFTin, IFFTout, planIFFT, output, outTF);
 
   // free all the malloced memory blocks
-  fftw_free(norm);
+  free(norm);
   free(Error);
+
+  for(int k = 0; k < 2; k++){
+    fftw_free(TFdomain[k]);
+    fftw_free(outTF[k]);
+  }
+  fftw_free(TFdomain);
+  fftw_free(outTF);
 }
 
 /*
   * Updates the filter coëfficients using the input data (in the form of the p array), the stepsize and the error value.
   * The error value is in the time frequency domain and is already calculated in the last executed transformation_func.
 */
-void nlmsUpdate(float stepsize, fftw_complex** coefs, fftw_complex** p, fftw_complex* prevError, int FFT_HALF){
+void nlmsUpdate(float stepsize, fftw_complex*** coefs, fftw_complex*** p, fftw_complex** prevError, int N_STFT_HALF){
   // There is one error for each frequency bin
   // The new coefficients is the old one added to a multiplication of the frequency bin error, the stepsize and the sum of the bins p values
   for(int i = 0; i < 4; i++){
-    for(int j = 0; j < FFT_HALF; j++){
-      coefs[i][j][0] += p[i][j][0] * prevError[j][0] * stepsize;
-      coefs[i][j][1] += p[i][j][1] * prevError[j][1] * stepsize;
+    for(int k = 0; k < 2; k++){
+      for(int j = 0; j < USED_BINS; j++){
+        coefs[i][k][j][0] += p[i][k][j][0] * prevError[k][j][0] * stepsize;
+        coefs[i][k][j][1] += p[i][k][j][1] * prevError[k][j][1] * stepsize;
+      }
     }
   }
 }
@@ -817,12 +853,12 @@ void nlmsUpdate(float stepsize, fftw_complex** coefs, fftw_complex** p, fftw_com
 /*
   * Transforms the an array to the Time-frequency domain
 */
-void TFtransform(int N_STFT, int R_STFT, int FFT_HALF, npy_float64 input[2*N_STFT], npy_float64* FFTin, fftw_complex* FFTout, fftw_plan planFFT){
+void TFtransform(int N_STFT, int R_STFT, int N_STFT_HALF, npy_float64 input[2*N_STFT], npy_float64* FFTin, fftw_complex* FFTout, fftw_plan planFFT, fftw_complex** TFdomain){
   // init the variables
   npy_float64* x_frame = malloc(N_STFT * sizeof(npy_float64));
 
   // loop through the input array using 50% overlap (2 + 0.5*2 = 3)
-  for(int i = 0; i < 3; i++){
+  for(int i = 0; i < 2; i++){
     // add frames using the 50% overlap and fit them behind each other in FFTin
     for(int j = 0; j < N_STFT; j++){
       x_frame[j] = input[i*(N_STFT - R_STFT) + j];
@@ -830,13 +866,18 @@ void TFtransform(int N_STFT, int R_STFT, int FFT_HALF, npy_float64 input[2*N_STF
     // implement squared Hann window on each frame
     for(int j = 0; j < N_STFT; j++) {
       npy_float64 multiplier = sqrt(0.5 * (1 - cos(2*M_PI*j/N_STFT)));
-      FFTin[i*N_STFT + j] = multiplier * x_frame[j];
+      FFTin[j] = multiplier * x_frame[j];
+    }
+
+    // execute the fft
+    fftw_execute(planFFT);
+
+    // write away to the TFdomain array
+    for(int j = 0; j < N_STFT_HALF; j++){
+      TFdomain[i][j][0] = FFTout[j][0];
+      TFdomain[i][j][1] = FFTout[j][1];
     }
   }
-
-  // execute the fft
-  fftw_execute(planFFT);
-
   // free the malloced memory blocks
   free(x_frame);
 }
@@ -844,22 +885,33 @@ void TFtransform(int N_STFT, int R_STFT, int FFT_HALF, npy_float64 input[2*N_STF
 /*
   * Ttransforms the output array to back to the time domain
 */
-void outputTransform(int N_STFT, int R_STFT, int FFT_HALF, fftw_complex* IFFTin, npy_float64* IFFTout, fftw_plan planIFFT, npy_float64* output){
+void outputTransform(int N_STFT, int R_STFT, int N_STFT_HALF, fftw_complex* IFFTin, npy_float64* IFFTout, fftw_plan planIFFT, npy_float64* output, fftw_complex** outTF){
   // set output back to zero
   memset(output, 0, N_STFT*sizeof(npy_float64));
 
-  // execute the ifft on the output array
-  fftw_execute(planIFFT);
+  // loop through the outTF array
+  for(int k = 0; k < 2; k++){
+    // set IFFTin on zero
+    memset(IFFTin, 0, N_STFT_HALF * sizeof(fftw_complex));
 
-  // loop through all the frames an construct them back to orignal using
-  // the hann-window
-  for(int i = 0; i < 3; i++){
-    for(int j = 0; j < N_STFT; j++){
-      if((i * R_STFT + j) >= R_STFT && (i * N_STFT + j) < (FFT_WINDOW - R_STFT)){
-        npy_float64 multiplier = sqrt(0.5 * (1 - cos(2*M_PI*j/N_STFT)));
-        int pos = j + (i-1)*R_STFT;
-        int temp = FFT_WINDOW;
-        output[pos] += multiplier * IFFTout[i*N_STFT + j] / temp;
+    // write the values to the IFFT array
+    for(int j = 0; j < USED_BINS; j++){
+      IFFTin[j][0] = outTF[k][j][0];
+      IFFTin[j][1] = outTF[k][j][1];
+    }
+
+    // execute the IFFT on the output array
+    fftw_execute(planIFFT);
+
+    // sum and add the output values and recuperate the output using the window
+    for(int i = 0; i < N_STFT; i++){
+      if(k == 0 && i >= R_STFT){
+        npy_float64 multiplier = sqrt(0.5 * (1 - cos(2*M_PI*i/N_STFT)));
+        output[i - R_STFT] += multiplier * IFFTout[i]/N_STFT;
+      }
+      else if(k == 1 && i < R_STFT){
+        npy_float64 multiplier = sqrt(0.5 * (1 - cos(2*M_PI*i/N_STFT)));
+        output[i] += multiplier * IFFTout[i]/N_STFT;
       }
     }
   }

@@ -69,15 +69,12 @@ typedef struct{
 */
 #define DELAY 8 // the delay between the closest propeller at 8820Hz is 8 samples
 #define LENGTH  1 // Indicates how many input samples are recorded each loop and has to be a natural divider of DELAY
-#define NROFCOEFS 13
-#define DURATION 120000 // Nr of times the loop is executing (consisting of 2 cycles each time)
+#define NROFCOEFS 15
+#define DURATION 97016 // Nr of times the loop is executing (consisting of 2 cycles each time)
 #define INPUTLENGTH 248886 // length of the input recording
-#define STEPSIZE 5.5
+#define STEPSIZE 4.5
 #define interpropellerDelay 2 // sample delay between the two closer propellers and the two further away
-// If you want to update every loop (!= 1) of twice a loop (= 1).
-// If only every loop, the update of the coefficients happens on the coefficients it calculated its output on.
-// Else it is already adjusted by the previous update
-#define DOUBLE_UPDATE 1
+
 
 /*
 * Declaration of the functions
@@ -222,7 +219,7 @@ npy_float64** audioSet(){
   npy_float64** array;
 
   // import the .py file in which the to-call python function is located
-  pName = PyUnicode_FromString("readFiles_time");
+  pName = PyUnicode_FromString("readFiles");
   pModule = PyImport_Import(pName);
   Py_DECREF(pName);
   if(pModule == NULL) printf("its null\n");
@@ -277,7 +274,7 @@ npy_float64** audioSet(){
 }
 
 /*
-  * Function which calls a Python extension to write the resulting signal to a
+  * Function which calls a Python extension to write the residual error to a
   * .wav file. This way the result can be easily analysed and replayed.
 */
 int writeFilesResult(npy_float64 output[]){
@@ -347,7 +344,7 @@ int writeFilesResult(npy_float64 output[]){
 
 
 /*
-  * Function which calls a Python extension to write the resulting signal to a
+  * Function which calls a Python extension to write the speaker signal to a
   * .wav file. This way the result can be easily analysed and replayed.
 */
 int writeFilesSpeaker(npy_float64 output[]){
@@ -437,7 +434,7 @@ void* micRecord(void* rArgs){
     // used to determine the time each funtion takes to execute
     time_t etime = 0;
     time_t first, second;
-
+    first = clock();
   // loop through the 2 cycles of the reading for duration times
   for(int i = 0; i<duration; i++){
 
@@ -449,8 +446,8 @@ void* micRecord(void* rArgs){
       if(*written1 != 0){
         pthread_cond_wait(args.cond12, mutex1r);
       }
-      first = clock();
-
+      second = clock();
+      etime += second - first;
       // loops through the rec array to put in new inputs. Each propeller has
       // its own collum in the rec array. Two propellers have a larger delay
       // than the other two. Those are inserted in a delayed position.
@@ -508,8 +505,7 @@ void* micRecord(void* rArgs){
       if(*written2 != 0){
         pthread_cond_wait(args.cond22, mutex2r);
       }
-      second = clock();
-      etime += second - first;
+      first = clock();
 
       // loops through the rec array to put in new inputs. Each propeller has
       // its own collum in the rec array. Two propellers have a larger delay
@@ -636,7 +632,7 @@ void* calc(void* cArgs){
       // write the residual error to the result array for further analysis
       for(int j = 0; j < LENGTH; j++, resultPos++){
         result[resultPos] = prevError[j];
-        outArray[resultPos] = play1[j];
+        outArray[resultPos] = play2[j];
       }
 
       *written1 = 0; // indicate that the FIR is finished
@@ -644,14 +640,6 @@ void* calc(void* cArgs){
       pthread_mutex_unlock(mutex1p);
     pthread_mutex_unlock(mutex1r);
     pthread_cond_broadcast(args.cond12); // if the next input may be read
-
-    // If false, the coefs update happens only every loop. This causes the update
-    // to be executed on coefs on which the output was calculated. If true, This
-    // happens on coefs that are already adjusted by the previous cycle.
-    if(DOUBLE_UPDATE == 1){
-      // calls the update function to update the coefficients
-      nlmsUpdate(insertPos, stepsize, coefs, prevInputs, prevError[LENGTH-1]);
-    }
 
     // Insert rec1[][] into the FIR array and calculate the current output signal
     // Also calculate the previous error and insert the previous inputs in prevInputs
@@ -667,7 +655,7 @@ void* calc(void* cArgs){
       fir(&insertPos, &bufferPos, rec2, firArray, coefs, play2, inputBuffer, play1, prevInputs, prevError);
       for(int j = 0; j < LENGTH; j++, resultPos++){
         result[resultPos] = prevError[j];
-        outArray[resultPos] = play2[j];
+        outArray[resultPos] = play1[j];
       }
 
       *written2 = 0; // indicate that the FIR is finished
@@ -679,9 +667,7 @@ void* calc(void* cArgs){
     // calls the update function to update the coefficients
     nlmsUpdate(insertPos, stepsize, coefs, prevInputs, prevError[LENGTH-1]);
   }
-  /*for(int i = 0; i < 20; i++){
-    printf("%"NPY_FLOAT64_FMT"\n", result[resultPos -1 - i]);
-  }*/
+
   printf("calc thread done\n");
   pthread_exit(NULL);
 }

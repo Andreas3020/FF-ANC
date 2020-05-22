@@ -9,7 +9,9 @@ def recordSound():
     recArray3, fs = sf.read("Audio/verder.wav")
     recArray4, fs = sf.read("Audio/verste.wav")
     recArray5, fs = sf.read("Audio/error_speech.wav")
+    #recArray5, fs = sf.read("Audio/error.wav")
 
+    # stack them up together in one array
     recArray = np.stack((recArray1, recArray2, recArray3, recArray4, recArray5), axis = 1)
 
     print(np.shape(recArray))
