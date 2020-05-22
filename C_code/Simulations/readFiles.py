@@ -4,10 +4,10 @@ import soundfile as sf
 def recordSound():
     #reads the .wav files with
     # a length of 248886
-    recArray1, fs = sf.read("Audio/dichtste.wav")
-    recArray2, fs = sf.read("Audio/ver.wav")
-    recArray3, fs = sf.read("Audio/verder.wav")
-    recArray4, fs = sf.read("Audio/verste.wav")
+    recArray1, fs = sf.read("Audio/closest.wav")
+    recArray2, fs = sf.read("Audio/close.wav")
+    recArray3, fs = sf.read("Audio/far.wav")
+    recArray4, fs = sf.read("Audio/furthest.wav")
     recArray5, fs = sf.read("Audio/error_speech.wav")
     #recArray5, fs = sf.read("Audio/error.wav")
 
