@@ -11,13 +11,29 @@ The audio used for testing is available in the folder 'Audio'.
 -- TIME DOMAIN --
 The files that are nessecairy to run the code : 
   * T_ANC_multichannel.m
-  * ANC_T_to_TF.m (Function)
+  * ANC_T_to_TF.m 
   * calc_STFT.m
   * calc_ISTFT.m 
   
 Only the first file 'T_ANC_multichannel.m' needs to be runned which uses the functions 'ANC_T_to_TF.m', 'calc_STFT.m' and 'calc_ISTFT.m'. 
 
 -- TIME-FREQUENCY DOMAIN --
-
+The files that are nessecairy to run the code : 
+  * TF_ANC_multichannel.m
+  * ANC_T_to_TF.m 
+  * calc_STFT.m
+  * calc_ISTFT.m 
+  
+Only the first file 'TF_ANC_multichannel.m' needs to be runned which uses the functions 'ANC_T_to_TF.m', 'calc_STFT.m' and 'calc_ISTFT.m'. 
 
 -- APPLICATION -- 
+The files that are nessecairy to run the code : 
+  * Application_ANC.m
+  * ANC_T_to_TF.m 
+  * calc_STFT.m
+  * calc_ISTFT.m 
+  * ANC_t_multichannel.m 
+  * ANC_tf_multichannel.m
+  
+Only the first file 'Application_ANC.m' needs to be runned which uses the other as functions. When the application is runned, it contains
+a control pannel to chose all parameters. 
