@@ -6,13 +6,16 @@
 
 This folder contains all of the Matlab code developed for prototyping the ANC algorithm. The prototype is developed in both the time 
 and time-frequency domain. For the ease of testing also a Matlab application is developed which can be found in the folder 'Application'.
+The audio used for testing is available in the folder 'Audio'. 
 
 -- TIME DOMAIN --
 The files that are nessecairy to run the code : 
   * T_ANC_multichannel.m
   * ANC_T_to_TF.m (Function)
+  * calc_STFT.m
+  * calc_ISTFT.m 
   
-Only the first file 'T_ANC_multichannel.m' needs to be runned which uses the function 'ANC_T_to_TF.m'. 
+Only the first file 'T_ANC_multichannel.m' needs to be runned which uses the functions 'ANC_T_to_TF.m', 'calc_STFT.m' and 'calc_ISTFT.m'. 
 
 -- TIME-FREQUENCY DOMAIN --
 
